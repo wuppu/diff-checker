@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clean Diff Viewer</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jsdiff/5.1.0/diff.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+
+  <style>
+    :root {
+      --primary-color: #2563eb;
+      --primary-hover: #1d4ed8;
+      --bg-color: #f3f4f6;
+      --card-bg: #ffffff;
+      --border-color: #e5e7eb;
+      --text-main: #1f2937;
+      --text-sub: #6b7280;
+
+      /* 배경색 */
+      --diff-del-bg: #fecaca;
+      --diff-del-text: #991b1b;
+      --diff-add-bg: #bbf7d0;
+      --diff-add-text: #166534;
+      --diff-empty-bg: #f9fafb;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-main);
+      margin: 0;
+      padding: 40px 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    header { text-align: center; margin-bottom: 30px; }
+    h1 { font-size: 24px; font-weight: 600; margin: 0 0 8px 0; letter-spacing: -0.5px; }
+    p { font-size: 14px; color: var(--text-sub); margin: 0; }
+
+    .main-container { width: 100%; max-width: 1400px; display: flex; flex-direction: column; gap: 20px; }
+
+    .input-card {
+      background-color: var(--card-bg);
+      border-radius: 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      padding: 20px;
+      border: 1px solid var(--border-color);
+    }
+
+    .input-group { display: flex; gap: 20px; }
+    .input-box { flex: 1; display: flex; flex-direction: column; position: relative; }
+
+    label {
+      font-size: 13px; font-weight: 600; color: var(--text-sub); margin-bottom: 8px;
+      text-transform: uppercase; letter-spacing: 0.5px; display: flex; justify-content: space-between;
+    }
+
+    .drag-hint { font-size: 11px; color: var(--primary-color); font-weight: 500; text-transform: none; }
+
+    textarea {
+      width: 100%; height: 250px; padding: 12px; border: 1px solid var(--border-color);
+      border-radius: 8px; resize: vertical; font-family: 'JetBrains Mono', 'Consolas', monospace;
+      font-size: 13px; line-height: 1.5; box-sizing: border-box; background-color: #fafafa;
+      transition: all 0.2s;
+    }
+    textarea:focus { outline: none; border-color: var(--primary-color); box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); background-color: #fff; }
+    textarea.drag-over { border-color: var(--primary-color); background-color: #eff6ff; box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.2); }
+
+    .actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 10px; }
+
+    button {
+      padding: 10px 24px; border: none; border-radius: 8px; font-weight: 500; cursor: pointer;
+      font-size: 14px; font-family: 'Inter', sans-serif; transition: all 0.2s ease;
+    }
+    .btn-primary { background-color: var(--primary-color); color: white; box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2); }
+    .btn-primary:hover { background-color: var(--primary-hover); transform: translateY(-1px); }
+    .btn-secondary { background-color: white; color: var(--text-main); border: 1px solid var(--border-color); }
+    .btn-secondary:hover { background-color: #f9fafb; border-color: #d1d5db; }
+
+    #result-container {
+      background-color: var(--card-bg); border-radius: 12px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); border: 1px solid var(--border-color);
+      overflow: hidden; display: none;
+    }
+
+    .diff-header {
+      display: flex; border-bottom: 1px solid var(--border-color);
+      background-color: #f9fafb; font-size: 12px; font-weight: 600; color: var(--text-sub);
+    }
+    .diff-header .pane { padding: 10px 15px; width: 50%; }
+
+    .diff-body { font-family: 'JetBrains Mono', 'Consolas', monospace; font-size: 12px; line-height: 22px; }
+    .diff-row { display: flex; border-bottom: 1px solid #f3f4f6; }
+    .diff-row:last-child { border-bottom: none; }
+
+    .pane { width: 50%; display: flex; }
+    .pane.left { border-right: 1px solid var(--border-color); }
+
+    .line-num {
+      width: 40px; text-align: right; padding-right: 12px; color: #9ca3af;
+      background-color: #f9fafb; user-select: none; flex-shrink: 0; border-right: 1px solid #eee;
+    }
+    .line-content { flex: 1; padding-left: 12px; white-space: pre-wrap; word-break: break-all; color: var(--text-main); }
+
+    /* === 스타일 === */
+    .removed { background-color: var(--diff-del-bg); color: var(--diff-del-text); font-weight: 700; }
+    .added { background-color: var(--diff-add-bg); color: var(--diff-add-text); font-weight: 700; }
+    .empty { background-color: var(--diff-empty-bg); }
+
+    /* === 핵심: 화살표 전용 스타일 (폰트 강제 고정) === */
+    .arrow-fixed {
+      font-family: 'Consolas', monospace !important; /* 무조건 고정폭 폰트 사용 */
+      font-weight: normal; /* 볼드체 상속 방지 (원하면 700으로 변경 가능) */
+      display: inline-block;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Clean Diff Viewer</h1>
+  <p>Drag & Drop files or Paste text to compare.</p>
+</header>
+
+<div class="main-container">
+
+  <div class="input-card">
+    <div class="input-group">
+      <div class="input-box">
+        <label>Original <span class="drag-hint">Drop file here</span></label>
+        <textarea id="original" placeholder="Paste text or Drag & Drop file here..."></textarea>
+      </div>
+      <div class="input-box">
+        <label>Modified <span class="drag-hint">Drop file here</span></label>
+        <textarea id="changed" placeholder="Paste text or Drag & Drop file here..."></textarea>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn-secondary" onclick="downloadExcel()">Excel Download</button>
+      <button class="btn-primary" onclick="processDiff()">Compare</button>
+    </div>
+  </div>
+
+  <div id="result-container">
+    <div class="diff-header">
+      <div class="pane">ORIGINAL</div>
+      <div class="pane" style="border-left: 1px solid #e5e7eb;">MODIFIED</div>
+    </div>
+    <div id="result-body" class="diff-body"></div>
+  </div>
+
+</div>
+
+<script>
+  // === 드래그 앤 드롭 ===
+  function setupDragAndDrop(elementId) {
+    const textarea = document.getElementById(elementId);
+    textarea.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); textarea.classList.add('drag-over'); });
+    textarea.addEventListener('dragleave', (e) => { e.preventDefault(); e.stopPropagation(); textarea.classList.remove('drag-over'); });
+    textarea.addEventListener('drop', (e) => {
+      e.preventDefault(); e.stopPropagation(); textarea.classList.remove('drag-over');
+      if (e.dataTransfer.files.length > 0) {
+        const reader = new FileReader();
+        reader.onload = (ev) => { textarea.value = ev.target.result; };
+        reader.readAsText(e.dataTransfer.files[0]);
+      }
+    });
+  }
+  setupDragAndDrop('original');
+  setupDragAndDrop('changed');
+
+  // === Diff 로직 ===
+  let globalDiffRows = [];
+
+  // HTML 문자열에서 화살표(-->)만 찾아서 폰트 강제 적용 span으로 감싸는 함수
+  function fixArrowFont(htmlStr) {
+    // escapeHtml이 먼저 실행되므로 '>'는 '&gt;'로 변환된 상태임
+    // 따라서 '--&gt;'를 찾아서 교체해야 함
+    return htmlStr.replace(/--&gt;/g, '<span class="arrow-fixed">--&gt;</span>');
+  }
+
+  function getInlineDiff(oldText, newText) {
+    const parts = Diff.diffWordsWithSpace(oldText, newText);
+
+    let leftHtml = '';
+    let rightHtml = '';
+    let leftRich = [];
+    let rightRich = [];
+
+    const colorRed = { argb: 'FF991B1B' };
+    const colorGreen = { argb: 'FF166534' };
+
+    parts.forEach(part => {
+      const rawText = part.value;
+      const escText = escapeHtml(rawText);
+
+      // HTML 생성: span 없이 텍스트만 나열 (박스 제거)
+      // 나중에 fixArrowFont 함수로 화살표만 따로 처리할 것임
+      if (part.removed) { leftHtml += escText; }
+      else if (part.added) { rightHtml += escText; }
+      else { leftHtml += escText; rightHtml += escText; }
+
+      // 엑셀 Rich Text
+      if (part.removed) { leftRich.push({ text: rawText, font: { bold: true, color: colorRed } }); }
+      else if (part.added) { rightRich.push({ text: rawText, font: { bold: true, color: colorGreen } }); }
+      else {
+        leftRich.push({ text: rawText, font: { bold: true, color: colorRed } });
+        rightRich.push({ text: rawText, font: { bold: true, color: colorGreen } });
+      }
+    });
+
+    return { leftHtml, rightHtml, leftRich, rightRich };
+  }
+
+  function processDiff() {
+    const originalText = document.getElementById('original').value;
+    const changedText = document.getElementById('changed').value;
+    const resultContainer = document.getElementById('result-container');
+    const resultBody = document.getElementById('result-body');
+
+    resultBody.innerHTML = '';
+    globalDiffRows = [];
+
+    if (!originalText && !changedText) {
+      alert("Please enter text or drop files to compare.");
+      return;
+    }
+
+    resultContainer.style.display = 'block';
+
+    const diff = Diff.diffLines(originalText, changedText);
+
+    let i = 0;
+    while (i < diff.length) {
+      const part = diff[i];
+      const lines = part.value.split('\n');
+      if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+
+      if (!part.added && !part.removed) {
+        lines.forEach(line => {
+          globalDiffRows.push({ left: { text: line, type: 'normal' }, right: { text: line, type: 'normal' } });
+        });
+        i++;
+      } else if (part.removed) {
+        if (i + 1 < diff.length && diff[i+1].added) {
+          const nextPart = diff[i+1];
+          const nextLines = nextPart.value.split('\n');
+          if (nextLines.length > 0 && nextLines[nextLines.length - 1] === '') nextLines.pop();
+
+          const maxCount = Math.max(lines.length, nextLines.length);
+          for (let j = 0; j < maxCount; j++) {
+            const lText = lines[j];
+            const rText = nextLines[j];
+
+            if (lText !== undefined && rText !== undefined) {
+              const { leftHtml, rightHtml, leftRich, rightRich } = getInlineDiff(lText, rText);
+              globalDiffRows.push({
+                left: { text: lText, type: 'removed', html: leftHtml, richText: leftRich },
+                right: { text: rText, type: 'added', html: rightHtml, richText: rightRich }
+              });
+            } else {
+              const lNorm = lText !== undefined ? lText : '';
+              const rNorm = rText !== undefined ? rText : '';
+              globalDiffRows.push({
+                left: lText !== undefined ? { text: lNorm, type: 'removed' } : { text: '', type: 'empty' },
+                right: rText !== undefined ? { text: rNorm, type: 'added' } : { text: '', type: 'empty' }
+              });
+            }
+          }
+          i += 2;
+        } else {
+          lines.forEach(line => {
+            globalDiffRows.push({ left: { text: line, type: 'removed' }, right: { text: '', type: 'empty' } });
+          });
+          i++;
+        }
+      } else if (part.added) {
+        lines.forEach(line => {
+          globalDiffRows.push({ left: { text: '', type: 'empty' }, right: { text: line, type: 'added' } });
+        });
+        i++;
+      }
+    }
+
+    let lNum = 1, rNum = 1;
+    globalDiffRows.forEach(row => {
+      row.left.num = row.left.type !== 'empty' ? lNum++ : '';
+      row.right.num = row.right.type !== 'empty' ? rNum++ : '';
+    });
+
+    renderHtml(globalDiffRows);
+  }
+
+  function renderHtml(rows) {
+    const resultBody = document.getElementById('result-body');
+    rows.forEach(row => {
+      const div = document.createElement('div');
+      div.className = 'diff-row';
+
+      // 1. 기본 텍스트 이스케이프 또는 Inline Diff 결과 가져오기
+      let lContent = row.left.html || escapeHtml(row.left.text || '');
+      let rContent = row.right.html || escapeHtml(row.right.text || '');
+
+      // 2. 화살표(->, -->) 폰트 고정 적용
+      // 여기서 'fixArrowFont'를 호출하여 화살표 부분만 span으로 감쌈
+      lContent = fixArrowFont(lContent);
+      rContent = fixArrowFont(rContent);
+
+      div.innerHTML = `
+                    <div class="pane left">
+                        <div class="line-num">${row.left.num}</div>
+                        <div class="line-content ${row.left.type}">${lContent}</div>
+                    </div>
+                    <div class="pane right">
+                        <div class="line-num">${row.right.num}</div>
+                        <div class="line-content ${row.right.type}">${rContent}</div>
+                    </div>
+                `;
+      resultBody.appendChild(div);
+    });
+  }
+
+  async function downloadExcel() {
+    if (globalDiffRows.length === 0) { alert("Please click 'Compare' first."); return; }
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Diff Result');
+
+    sheet.columns = [
+      { header: 'Line', key: 'lNum', width: 8 }, { header: 'Original Text', key: 'lText', width: 60 },
+      { header: 'Line', key: 'rNum', width: 8 }, { header: 'Modified Text', key: 'rText', width: 60 }
+    ];
+
+    const headerRow = sheet.getRow(1);
+    headerRow.font = { bold: true, size: 12, name: 'Calibri' };
+    headerRow.alignment = { horizontal: 'center', vertical: 'middle' };
+    headerRow.height = 30;
+    headerRow.eachCell((cell) => {
+      cell.fill = { type: 'pattern', pattern:'solid', fgColor:{argb:'FFF3F4F6'} };
+      cell.border = {
+        bottom: { style: 'medium', color: { argb: 'FF9CA3AF' } },
+        right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
+      };
+    });
+
+    globalDiffRows.forEach(row => {
+      const newRow = sheet.addRow({
+        lNum: row.left.num,
+        lText: row.left.richText ? { richText: row.left.richText } : (row.left.text || ''),
+        rNum: row.right.num,
+        rText: row.right.richText ? { richText: row.right.richText } : (row.right.text || '')
+      });
+
+      ['lText', 'rText'].forEach(k => newRow.getCell(k).alignment = { wrapText: true, vertical: 'top', horizontal: 'left' });
+      ['lNum', 'rNum'].forEach(k => newRow.getCell(k).alignment = { vertical: 'top', horizontal: 'center' });
+
+      if (row.left.type === 'removed') {
+        newRow.getCell('lText').font = { bold: true, color: { argb: 'FF991B1B' } };
+        ['lNum', 'lText'].forEach(k => newRow.getCell(k).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFECACA' } });
+      } else if (row.left.type === 'empty') {
+        ['lNum', 'lText'].forEach(k => newRow.getCell(k).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3F4F6' } });
+      }
+
+      if (row.right.type === 'added') {
+        newRow.getCell('rText').font = { bold: true, color: { argb: 'FF166534' } };
+        ['rNum', 'rText'].forEach(k => newRow.getCell(k).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFBBF7D0' } });
+      } else if (row.right.type === 'empty') {
+        ['rNum', 'rText'].forEach(k => newRow.getCell(k).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3F4F6' } });
+      }
+
+      newRow.eachCell(cell => { cell.border = { right: {style:'thin', color: {argb:'FFE5E7EB'}} }; });
+    });
+
+    const lastRowIdx = sheet.rowCount;
+    const borderStyle = 'medium';
+    const borderColor = { argb: 'FF000000' };
+
+    sheet.eachRow((row, rowNumber) => {
+      row.eachCell((cell, colNumber) => {
+        const currentBorder = cell.border || {};
+        if (rowNumber === 1) { currentBorder.top = { style: borderStyle, color: borderColor }; }
+        if (rowNumber === lastRowIdx) { currentBorder.bottom = { style: borderStyle, color: borderColor }; }
+        if (colNumber === 1) { currentBorder.left = { style: borderStyle, color: borderColor }; }
+        if (colNumber === 4) { currentBorder.right = { style: borderStyle, color: borderColor }; }
+        cell.border = currentBorder;
+      });
+    });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    saveAs(blob, 'diff_result.xlsx');
+  }
+
+  function escapeHtml(text) {
+    if (!text) return '';
+    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+  }
+</script>
+</body>
+</html>
